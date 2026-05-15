@@ -1,29 +1,24 @@
 import re
 
-def chunk_text(text, chunk_size=800, overlap=150):
+def chunk_text(text, chunk_size=900, overlap=150):
     """
-    Better chunking:
-    - sentence-aware
-    - overlap for context continuity
+    Better than character slicing:
+    sentence-aware + overlap context
     """
 
-    # Split into sentences
     sentences = re.split(r'(?<=[.!?])\s+', text)
 
     chunks = []
-    current_chunk = ""
+    current = ""
 
     for sentence in sentences:
-        # If adding sentence exceeds limit, store chunk
-        if len(current_chunk) + len(sentence) > chunk_size:
-            chunks.append(current_chunk.strip())
-
-            # overlap handling (keep last part)
-            current_chunk = current_chunk[-overlap:] + " " + sentence
+        if len(current) + len(sentence) < chunk_size:
+            current += " " + sentence
         else:
-            current_chunk += " " + sentence
+            chunks.append(current.strip())
+            current = current[-overlap:] + " " + sentence
 
-    if current_chunk.strip():
-        chunks.append(current_chunk.strip())
+    if current.strip():
+        chunks.append(current.strip())
 
     return chunks

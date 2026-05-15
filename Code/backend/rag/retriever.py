@@ -2,16 +2,12 @@ from rag.embedder import embed_query
 from rag.vector_store import search
 
 
-def retrieve_context(question, k=4):
-    """
-    Retrieves most relevant chunks from FAISS
-    """
-
+def retrieve_context(question, k=5):
     query_embedding = embed_query(question)
 
     results = search(query_embedding, k=k)
 
-    # Remove duplicates while preserving order
+    # remove duplicates
     seen = set()
     filtered = []
 
@@ -19,5 +15,9 @@ def retrieve_context(question, k=4):
         if r not in seen:
             filtered.append(r)
             seen.add(r)
+
+    # fallback protection
+    if not filtered:
+        return "No relevant context found in document."
 
     return "\n\n".join(filtered)

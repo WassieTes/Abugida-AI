@@ -11,59 +11,46 @@ class ChatRequest(BaseModel):
     question: str
 
 
-# @router.post("/chat")
-# def chat(request: ChatRequest):
-#     context = retrieve_context(request.question)
-
-#     prompt = f"""
-# You are an educational AI tutor.
-
-# Use the context below to answer the student's question.
-
-# Context:
-# {context}
-
-# Question:
-# {request.question}
-
-# Answer:
-# """
-
-#     answer = ask_llm(prompt)
-
-#     return {
-#         "answer": answer
-#     }
-
 @router.post("/chat")
 def chat(request: ChatRequest):
 
     context = retrieve_context(request.question)
 
-    if not context:
+    # HARD FAIL SAFE
+    if not context or context.strip() == "":
         return {
-            "answer": "No relevant information found in the uploaded PDF."
+            "answer": "I cannot find relevant information in the uploaded documents.",
+            "context_used": []
         }
 
+    # STRICT PROMPT (this is very important for accuracy)
     prompt = f"""
-You are a strict educational AI assistant.
+You are an offline AI educational tutor.
 
-RULES:
-- Use ONLY the context below.
-- If answer is not in context, say "Not found in document".
+STRICT RULES:
+- Use ONLY the provided context.
+- Do NOT use outside knowledge.
+- If the answer is not in the context, say: "Not found in document."
+- Keep answers simple and educational.
 
-Context:
+CONTEXT:
 {context}
 
-Question:
+QUESTION:
 {request.question}
 
-Answer:
+FINAL ANSWER:
 """
 
-    answer = ask_llm(prompt)
+    try:
+        answer = ask_llm(prompt)
+    except Exception as e:
+        return {
+            "answer": "Error while generating response from LLM.",
+            "error": str(e)
+        }
 
     return {
         "answer": answer,
-        "context": context  # for debugging
+        "context_used": context
     }

@@ -3,64 +3,67 @@ import numpy as np
 import os
 import pickle
 
-# Dimension for all-MiniLM-L6-v2 embeddings
-DIMENSION = 384
+DIMENSION = 384  # for all-MiniLM-L6-v2
 
-index = faiss.IndexFlatL2(DIMENSION)
+INDEX_PATH = "storage/faiss.index"
+META_PATH = "storage/chunks.pkl"
 
-# Store structured chunks instead of raw strings
-stored_chunks = []  # [{"text": ..., "doc": ...}]
+index = faiss.IndexFlatIP(DIMENSION)  # cosine similarity (IMPORTANT FIX)
+
+chunks_meta = []  # [{"text":..., "doc":..., "id":...}]
 
 
 def add_embeddings(embeddings, chunks, doc_name="unknown"):
-    global stored_chunks
+    global chunks_meta
 
     embeddings = np.array(embeddings).astype("float32")
 
-    # IMPORTANT: normalize for better similarity behavior
+    # Normalize for cosine similarity
     faiss.normalize_L2(embeddings)
 
     index.add(embeddings)
 
-    for chunk in chunks:
-        stored_chunks.append({
+    for i, chunk in enumerate(chunks):
+        chunks_meta.append({
             "text": chunk,
-            "doc": doc_name
+            "doc": doc_name,
+            "id": len(chunks_meta) + i
         })
 
 
-def search(query_embedding, k=3):
+def search(query_embedding, k=5):
     query_embedding = np.array([query_embedding]).astype("float32")
+
     faiss.normalize_L2(query_embedding)
 
-    distances, indices = index.search(query_embedding, k)
+    scores, indices = index.search(query_embedding, k)
 
     results = []
 
     for idx in indices[0]:
-        if 0 <= idx < len(stored_chunks):
-            results.append(stored_chunks[idx]["text"])
+        if 0 <= idx < len(chunks_meta):
+            results.append(chunks_meta[idx]["text"])
 
     return results
 
 
-# ---------------- OPTIONAL PERSISTENCE ----------------
+# ---------------- PERSISTENCE ----------------
 
-def save_store(path="storage/vector_store.pkl"):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+def save_store():
+    os.makedirs("storage", exist_ok=True)
 
-    faiss.write_index(index, path + ".faiss")
+    faiss.write_index(index, INDEX_PATH)
 
-    with open(path, "wb") as f:
-        pickle.dump(stored_chunks, f)
+    with open(META_PATH, "wb") as f:
+        pickle.dump(chunks_meta, f)
 
 
-def load_store(path="storage/vector_store.pkl"):
-    global index, stored_chunks
+def load_store():
+    global index, chunks_meta
 
-    if os.path.exists(path + ".faiss"):
-        index = faiss.read_index(path + ".faiss")
+    if os.path.exists(INDEX_PATH):
+        index = faiss.read_index(INDEX_PATH)
 
-    if os.path.exists(path):
-        with open(path, "rb") as f:
-            stored_chunks = pickle.load(f)
+    if os.path.exists(META_PATH):
+        with open(META_PATH, "rb") as f:
+            chunks_meta = pickle.load(f)
