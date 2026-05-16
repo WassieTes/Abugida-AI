@@ -7,7 +7,7 @@ def retrieve_context(question, k=5):
 
     results = search(query_embedding, k=k)
 
-    # remove duplicates
+    # remove duplicates safely
     seen = set()
     filtered = []
 
@@ -16,8 +16,8 @@ def retrieve_context(question, k=5):
             filtered.append(r)
             seen.add(r)
 
-    # fallback protection
-    if not filtered:
-        return "No relevant context found in document."
+# fallback protection 
+    if not filtered: 
+      return "No relevant context found in document."
 
     return "\n\n".join(filtered)

@@ -15,6 +15,10 @@ models/
 *.faiss
 *.index
 
+# Storage DB
+storage/
+*.pdf
+
 # OS
 .DS_Store
 Thumbs.db
