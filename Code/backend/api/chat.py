@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends
+
 from pydantic import BaseModel
+
 from sqlalchemy.orm import Session
 
 from llm.llama_engine import ask_llm
@@ -7,18 +9,33 @@ from llm.llama_engine import ask_llm
 from rag.retriever import retrieve_context
 
 from database.db import get_db
+
 from database.models import Chat, Message
+
 
 router = APIRouter()
 
 
+# ---------------- REQUEST MODEL ----------------
+
 class ChatRequest(BaseModel):
+
     question: str
+
     chat_id: int | None = None
 
+    # NEW
+    # allows document-specific retrieval
+    document_id: int | None = None
+
+
+# ---------------- CHAT ROUTE ----------------
 
 @router.post("/chat")
-def chat(request: ChatRequest, db: Session = Depends(get_db)):
+def chat(
+    request: ChatRequest,
+    db: Session = Depends(get_db)
+):
 
     # ---------------- CREATE CHAT ----------------
 
@@ -29,12 +46,15 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
         )
 
         db.add(new_chat)
+
         db.commit()
+
         db.refresh(new_chat)
 
         chat_id = new_chat.id
 
     else:
+
         chat_id = request.chat_id
 
     # ---------------- SAVE USER MESSAGE ----------------
@@ -46,24 +66,37 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
     )
 
     db.add(user_message)
+
     db.commit()
 
     # ---------------- RETRIEVE CONTEXT ----------------
 
-    context = retrieve_context(request.question)
+    context = retrieve_context(
+        request.question,
+        doc_id=request.document_id
+    )
+
+    # ---------------- NO CONTEXT FOUND ----------------
 
     if not context:
 
-        answer = "I cannot find relevant information in the uploaded documents."
+        answer = (
+            "I cannot find relevant information "
+            "in the uploaded documents."
+        )
 
     else:
+
+        # ---------------- PROMPT ----------------
 
         prompt = f"""
 You are an offline AI tutor.
 
 RULES:
-- Use ONLY the context
-- If not found, say "Not found in document"
+- Use ONLY the provided context
+- Do NOT hallucinate
+- If answer is missing, say:
+  "Not found in document"
 
 Context:
 {context}
@@ -74,7 +107,10 @@ Question:
 Answer:
 """
 
+        # ---------------- LLM ----------------
+
         try:
+
             answer = ask_llm(prompt)
 
         except Exception as e:
@@ -97,9 +133,12 @@ Answer:
 
     db.commit()
 
+    # ---------------- RESPONSE ----------------
+
     return {
         "success": True,
         "chat_id": chat_id,
+        "document_id": request.document_id,
         "answer": answer,
         "context_used": context
     }

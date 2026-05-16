@@ -1,80 +1,138 @@
 import { useState, useRef, useEffect } from "react";
 import { uploadPDF, askQuestion } from "./api";
+
 import { Plus, Trash2, Send, Brain, Upload, FileText, X } from "lucide-react";
 
 /* -------------------- helper -------------------- */
+
 const generateId = () =>
   Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 
 function App() {
   const [question, setQuestion] = useState("");
+
   const [chat, setChat] = useState([]);
 
   const [loading, setLoading] = useState(false);
+
   const [typing, setTyping] = useState(false);
 
   const [uploadedFiles, setUploadedFiles] = useState([]);
 
-  /* FIX 1 + 2: persistent + per-chat IDs */
+  // NEW
+  const [chatId, setChatId] = useState(null);
+
+  const [documentId, setDocumentId] = useState(null);
+
+  /* -------------------- history -------------------- */
+
   const [history, setHistory] = useState(() => {
     const saved = localStorage.getItem("chat_history");
+
     return saved ? JSON.parse(saved) : [];
   });
 
   const [activeChatId, setActiveChatId] = useState(null);
 
   const fileInputRef = useRef(null);
+
   const chatEndRef = useRef(null);
 
   const openFilePicker = () => fileInputRef.current.click();
 
   /* -------------------- persist -------------------- */
+
   useEffect(() => {
     localStorage.setItem("chat_history", JSON.stringify(history));
   }, [history]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    chatEndRef.current?.scrollIntoView({
+      behavior: "smooth",
+    });
   }, [chat, typing]);
 
   /* -------------------- upload PDF -------------------- */
+
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
+
     if (!file) return;
 
-    setUploadedFiles((prev) => [...prev, file]);
-
     setLoading(true);
+
     try {
-      await uploadPDF(file);
+      const res = await uploadPDF(file);
+
+      if (res.success) {
+        setUploadedFiles([file]);
+
+        setChatId(res.chat_id);
+
+        setDocumentId(res.document_id);
+
+        // clear previous chat
+        setChat([
+          {
+            role: "bot",
+            text:
+              `Document "${file.name}" uploaded successfully.\n\n` +
+              `You can now ask questions about this document.`,
+          },
+        ]);
+      } else {
+        setChat([
+          {
+            role: "bot",
+            text: res.message || "Failed to upload document.",
+          },
+        ]);
+      }
     } catch (err) {
       console.log(err);
+
+      setChat([
+        {
+          role: "bot",
+          text: "Upload failed.",
+        },
+      ]);
     } finally {
       setLoading(false);
     }
   };
 
-  /* -------------------- STREAMING (SIMULATED GPT) -------------------- */
+  /* -------------------- STREAMING -------------------- */
+
   const streamAnswer = (fullText) => {
     return new Promise((resolve) => {
       let i = 0;
 
-      setChat((prev) => [...prev, { role: "bot", text: "" }]);
+      setChat((prev) => [
+        ...prev,
+        {
+          role: "bot",
+          text: "",
+        },
+      ]);
 
       const interval = setInterval(() => {
         i++;
 
         setChat((prev) => {
           const copy = [...prev];
+
           copy[copy.length - 1] = {
             role: "bot",
             text: fullText.slice(0, i),
           };
+
           return copy;
         });
 
         if (i >= fullText.length) {
           clearInterval(interval);
+
           resolve();
         }
       }, 12);
@@ -82,68 +140,129 @@ function App() {
   };
 
   /* -------------------- SEND MESSAGE -------------------- */
+
   const send = async () => {
     if (!question.trim() || loading || typing) return;
 
+    // MUST upload first
+    if (!documentId) {
+      setChat((p) => [
+        ...p,
+        {
+          role: "bot",
+          text: "Please upload a document first.",
+        },
+      ]);
+
+      return;
+    }
+
     const userQ = question;
 
-    setChat((p) => [...p, { role: "user", text: userQ }]);
+    setChat((p) => [
+      ...p,
+      {
+        role: "user",
+        text: userQ,
+      },
+    ]);
+
     setQuestion("");
+
     setTyping(true);
 
     try {
-      const res = await askQuestion(userQ);
+      const res = await askQuestion(userQ, chatId, documentId);
+
       const answer = res?.answer ?? "No response";
 
       await streamAnswer(answer);
     } catch (e) {
-      setChat((p) => [...p, { role: "bot", text: "Error" }]);
+      setChat((p) => [
+        ...p,
+        {
+          role: "bot",
+          text: "Error",
+        },
+      ]);
     } finally {
       setTyping(false);
     }
   };
 
-  /* -------------------- NEW CHAT (SESSION SAVE) -------------------- */
+  /* -------------------- NEW CHAT -------------------- */
+
   const newChat = () => {
     if (chat.length > 0) {
       const firstUser = chat.find((m) => m.role === "user");
 
       const session = {
         id: activeChatId || generateId(),
-        title: firstUser?.text || "New Chat",
+
+        title: firstUser?.text || uploadedFiles?.[0]?.name || "New Chat",
+
         chat,
+
         files: uploadedFiles,
+
+        chatId,
+
+        documentId,
       };
 
       setHistory((prev) => [session, ...prev]);
     }
 
     setChat([]);
+
     setUploadedFiles([]);
+
+    setChatId(null);
+
+    setDocumentId(null);
+
     setActiveChatId(generateId());
   };
 
-  /* -------------------- OPEN CHAT -------------------- */
+  /* -------------------- OPEN HISTORY -------------------- */
+
   const openHistory = (item) => {
     setChat(item.chat || []);
+
     setUploadedFiles(item.files || []);
+
     setActiveChatId(item.id);
+
+    setChatId(item.chatId || null);
+
+    setDocumentId(item.documentId || null);
   };
 
   /* -------------------- REMOVE FILE -------------------- */
+
   const removeFile = (index) => {
     setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+
+    // reset document linkage
+    setDocumentId(null);
+
+    setChatId(null);
+
+    setChat([]);
   };
 
   return (
     <div className="app">
       {/* SIDEBAR */}
+
       <div className="sidebar">
         <div>
           <div className="logo">
             <div className="logo-icon">✦</div>
+
             <div>
               <h2>Abugida AI</h2>
+
               <p>Offline Assistant</p>
             </div>
           </div>
@@ -164,7 +283,9 @@ function App() {
                   key={h.id}
                   className="history-card"
                   onClick={() => openHistory(h)}
-                  style={{ cursor: "pointer" }}
+                  style={{
+                    cursor: "pointer",
+                  }}
                 >
                   {h.title}
                 </div>
@@ -177,6 +298,7 @@ function App() {
           className="clear-btn"
           onClick={() => {
             setHistory([]);
+
             localStorage.removeItem("chat_history");
           }}
         >
@@ -186,11 +308,14 @@ function App() {
       </div>
 
       {/* MAIN */}
+
       <div className="main">
         <div className="chat">
           <div className="hero">
             <Brain size={42} color="white" />
+
             <h1>How can I help you today?</h1>
+
             <p>Ask anything and process documents locally.</p>
 
             {uploadedFiles.length > 0 && (
@@ -205,14 +330,18 @@ function App() {
                     }}
                   >
                     <FileText />
+
                     <div>
                       <b>{f.name}</b>
+
                       <p>{(f.size / 1024 / 1024).toFixed(2)} MB</p>
                     </div>
 
                     <X
                       size={18}
-                      style={{ cursor: "pointer" }}
+                      style={{
+                        cursor: "pointer",
+                      }}
                       onClick={() => removeFile(i)}
                     />
                   </div>
@@ -242,6 +371,7 @@ function App() {
         </div>
 
         {/* INPUT */}
+
         <div className="input">
           <input
             ref={fileInputRef}
@@ -268,7 +398,8 @@ function App() {
         </div>
       </div>
 
-      {/* STYLES (UNCHANGED EXACTLY) */}
+      {/* STYLES */}
+
       <style>{`
         html, body, #root {
           height: 100%;

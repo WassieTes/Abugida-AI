@@ -14,12 +14,22 @@ from datetime import datetime
 from .db import Base
 
 
+# ================= CHAT =================
+
 class Chat(Base):
+
     __tablename__ = "chats"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
 
-    title = Column(String, default="New Chat")
+    title = Column(
+        String,
+        default="New Chat"
+    )
 
     created_at = Column(
         DateTime,
@@ -40,10 +50,17 @@ class Chat(Base):
     )
 
 
+# ================= MESSAGE =================
+
 class Message(Base):
+
     __tablename__ = "messages"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
 
     chat_id = Column(
         Integer,
@@ -65,19 +82,47 @@ class Message(Base):
     )
 
 
+# ================= DOCUMENT =================
+
 class Document(Base):
+
     __tablename__ = "documents"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
 
     chat_id = Column(
         Integer,
-        ForeignKey("chats.id")
+        ForeignKey("chats.id"),
+        index=True
     )
 
-    filename = Column(String)
+    filename = Column(
+        String,
+        index=True
+    )
 
     path = Column(String)
+
+    file_hash = Column(
+        String,
+        unique=True,
+        index=True
+    )
+
+    chunk_count = Column(
+        Integer,
+        default=0
+    )
+
+    status = Column(
+        String,
+        default="active"
+    )
+    # active | deleted | processing
 
     created_at = Column(
         DateTime,

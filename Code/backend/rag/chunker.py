@@ -1,6 +1,6 @@
 import re
 
-def chunk_text(text, chunk_size=900, overlap=150):
+def chunk_text(text, chunk_size=500, overlap=80):
     """
     Better than character slicing: sentence-aware + overlap context
     """

@@ -3,39 +3,49 @@ from fastapi import (
     UploadFile,
     File,
     HTTPException,
-    Form
+    Depends
 )
 
 from sqlalchemy.orm import Session
-
-from fastapi import Depends
 
 import fitz
 import os
 
 from rag.chunker import chunk_text
+
 from rag.embedder import generate_embeddings
+
 from rag.vector_store import (
     add_embeddings,
     save_store
 )
 
+from rag.file_utils import get_file_hash
+
 from database.db import get_db
-from database.models import Document
+
+from database.models import (
+    Document,
+    Chat
+)
 
 router = APIRouter()
 
 UPLOAD_FOLDER = "storage/documents"
 
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(
+    UPLOAD_FOLDER,
+    exist_ok=True
+)
 
 
 @router.post("/upload")
 async def upload_pdf(
     file: UploadFile = File(...),
-    chat_id: int = Form(...),
     db: Session = Depends(get_db)
 ):
+
+    # ---------------- VALIDATE PDF ----------------
 
     if not file.filename.endswith(".pdf"):
 
@@ -44,25 +54,62 @@ async def upload_pdf(
             detail="Only PDF allowed"
         )
 
+    file_bytes = await file.read()
+
+    file_hash = get_file_hash(file_bytes)
+
+    # ---------------- DUPLICATE DETECTION ----------------
+
+    existing = db.query(Document)\
+        .filter(
+            Document.file_hash == file_hash
+        ).first()
+
+    if existing:
+
+        return {
+            "success": False,
+            "message": "Duplicate document already exists"
+        }
+
+    # ---------------- CREATE CHAT ----------------
+
+    new_chat = Chat(
+        title=file.filename[:40]
+    )
+
+    db.add(new_chat)
+
+    db.commit()
+
+    db.refresh(new_chat)
+
+    # ---------------- SAVE FILE ----------------
+
     file_path = os.path.join(
         UPLOAD_FOLDER,
         file.filename
     )
 
     with open(file_path, "wb") as f:
-        f.write(await file.read())
 
-    # ---------------- SAVE DOCUMENT RECORD ----------------
+        f.write(file_bytes)
+
+    # ---------------- CREATE DOCUMENT ----------------
 
     document = Document(
-        chat_id=chat_id,
+        chat_id=new_chat.id,
         filename=file.filename,
-        path=file_path
+        path=file_path,
+        file_hash=file_hash,
+        status="processing"
     )
 
     db.add(document)
 
     db.commit()
+
+    db.refresh(document)
 
     # ---------------- READ PDF ----------------
 
@@ -71,7 +118,10 @@ async def upload_pdf(
     text = ""
 
     for page in pdf:
-        text += (page.get_text() or "") + "\n"
+
+        text += (
+            page.get_text() or ""
+        ) + "\n"
 
     if not text.strip():
 
@@ -80,22 +130,37 @@ async def upload_pdf(
             detail="No readable text found"
         )
 
-    # ---------------- CHUNK + EMBED ----------------
+    # ---------------- CHUNK ----------------
 
     chunks = chunk_text(text)
 
     embeddings = generate_embeddings(chunks)
 
+    # ---------------- SAVE EMBEDDINGS ----------------
+
     add_embeddings(
         embeddings,
         chunks,
-        doc_name=file.filename
+        doc_name=file.filename,
+        doc_id=document.id
     )
 
     save_store()
 
+    # ---------------- UPDATE DOCUMENT ----------------
+
+    document.chunk_count = len(chunks)
+
+    document.status = "active"
+
+    db.commit()
+
+    # ---------------- RESPONSE ----------------
+
     return {
         "success": True,
+        "chat_id": new_chat.id,
+        "document_id": document.id,
         "file": file.filename,
         "chunks": len(chunks)
     }

@@ -7,13 +7,11 @@ const API = axios.create({
 
 // ---------------- UPLOAD PDF ----------------
 
-export const uploadPDF = async (file, chatId) => {
+export const uploadPDF = async (file) => {
   try {
     const formData = new FormData();
 
     formData.append("file", file);
-
-    formData.append("chat_id", chatId);
 
     const res = await API.post("/upload", formData, {
       headers: {
@@ -27,7 +25,6 @@ export const uploadPDF = async (file, chatId) => {
 
     return {
       success: false,
-      chunks: 0,
       error: err.response?.data || err.message,
     };
   }
@@ -35,11 +32,12 @@ export const uploadPDF = async (file, chatId) => {
 
 // ---------------- CHAT ----------------
 
-export const askQuestion = async (question, chatId = null) => {
+export const askQuestion = async (question, chatId, documentId) => {
   try {
     const res = await API.post("/chat", {
       question,
       chat_id: chatId,
+      document_id: documentId,
     });
 
     return res.data;
