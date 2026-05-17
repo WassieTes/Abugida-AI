@@ -54,8 +54,9 @@ def add_embeddings(
 
 def search(
     query_embedding,
-    k=5,
-    doc_id=None
+    k=3,
+    doc_id=None,
+    score_threshold=0.45
 ):
 
     query_embedding = np.array(
@@ -71,7 +72,10 @@ def search(
 
     results = []
 
-    for idx in indices[0]:
+    for score, idx in zip(
+        scores[0],
+        indices[0]
+    ):
 
         if idx < 0:
             continue
@@ -79,15 +83,22 @@ def search(
         if idx >= len(chunks_meta):
             continue
 
+        # ignore weak similarity
+        if float(score) < score_threshold:
+            continue
+
         meta = chunks_meta[idx]
 
-        # document filter (IMPORTANT FOR ISOLATION)
+        # document isolation
         if doc_id is not None:
 
             if meta.get("doc_id") != doc_id:
                 continue
 
-        results.append(meta["text"])
+        results.append({
+            "text": meta["text"],
+            "score": float(score)
+        })
 
         if len(results) >= k:
             break

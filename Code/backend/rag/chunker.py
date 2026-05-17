@@ -1,23 +1,69 @@
 import re
 
-def chunk_text(text, chunk_size=500, overlap=80):
-    """
-    Better than character slicing: sentence-aware + overlap context
-    """
 
-    sentences = re.split(r'(?<=[.!?])\s+', text) 
+def clean_text(text):
+
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
+
+
+def split_paragraphs(text):
+
+    paragraphs = text.split("\n")
+
+    cleaned = []
+
+    for p in paragraphs:
+
+        p = clean_text(p)
+
+        if len(p) > 40:
+            cleaned.append(p)
+
+    return cleaned
+
+
+def chunk_text(
+    text,
+    chunk_size=700,
+    overlap=120
+):
+
+    paragraphs = split_paragraphs(text)
+
     chunks = []
-    current = ""
 
-    for sentence in sentences:
-        if len(current) + len(sentence) < chunk_size:
-          current += " " + sentence
+    current_chunk = ""
+
+    for paragraph in paragraphs:
+
+        # add paragraph safely
+        if len(current_chunk) + len(paragraph) < chunk_size:
+
+            current_chunk += "\n" + paragraph
 
         else:
-          chunks.append(current.strip())
-          current = current[-overlap:] + " " + sentence
 
-    if current.strip():
-        chunks.append(current.strip())
+            if current_chunk.strip():
+
+                chunks.append(
+                    current_chunk.strip()
+                )
+
+            # overlap keeps context continuity
+            overlap_text = current_chunk[-overlap:]
+
+            current_chunk = (
+                overlap_text +
+                "\n" +
+                paragraph
+            )
+
+    if current_chunk.strip():
+
+        chunks.append(
+            current_chunk.strip()
+        )
 
     return chunks

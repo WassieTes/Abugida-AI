@@ -14,7 +14,10 @@ from database.models import (
     Document
 )
 
-from rag.retriever import retrieve_context
+from rag.retriever import (
+    retrieve_context,
+    retrieve_document_overview
+)
 
 from llm.llama_engine import stream_llm
 
@@ -122,16 +125,47 @@ def chat(
     messages = messages[-8:]
 
     # =================================================
+    # SUMMARY DETECTION
+    # =================================================
+
+    summary_keywords = [
+        "summarize",
+        "summary",
+        "overview",
+        "explain document",
+        "what is this document about",
+        "describe this file"
+    ]
+
+    question_lower = request.question.lower()
+
+    is_summary_request = any(
+        keyword in question_lower
+        for keyword in summary_keywords
+    )
+
+    # =================================================
     # RETRIEVE CONTEXT
     # =================================================
 
-    context = retrieve_context(
-        question=request.question,
-        document_id=request.document_id,
-        k=5
-    )
+    if is_summary_request:
 
+        context = retrieve_document_overview(
+            document_id=request.document_id
+        )
+
+    else:
+
+        context = retrieve_context(
+            question=request.question,
+            document_id=request.document_id,
+            k=3
+        )
+
+    # =================================================
     # LIMIT CONTEXT SIZE
+    # =================================================
+
     context = context[:2500]
 
     # =================================================

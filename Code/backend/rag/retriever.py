@@ -1,9 +1,6 @@
 from rag.embedder import embed_query
 
-from rag.vector_store import (
-    search,
-    chunks_meta
-)
+from rag.vector_store import search
 
 
 def retrieve_context(
@@ -14,29 +11,62 @@ def retrieve_context(
 
     query_embedding = embed_query(question)
 
-    # IMPORTANT:
-    # search already supports doc filtering
     results = search(
         query_embedding,
         k=k,
-        doc_id=document_id
+        doc_id=document_id,
+        score_threshold=0.45
     )
 
-    # remove duplicates safely
-    filtered = []
+    if not results:
+        return ""
+
+    unique_chunks = []
 
     seen = set()
 
-    for r in results:
+    for item in results:
 
-        if r in seen:
+        text = item["text"]
+
+        if text in seen:
             continue
 
-        seen.add(r)
+        seen.add(text)
 
-        filtered.append(r)
+        unique_chunks.append(text)
 
-    if not filtered:
+    context = "\n\n".join(unique_chunks)
+
+    # IMPORTANT:
+    # keep prompt small for local model
+    context = context[:2500]
+
+    return context
+
+def retrieve_document_overview(
+    document_id,
+    max_chunks=6
+):
+
+    from rag.vector_store import chunks_meta
+
+    document_chunks = []
+
+    for item in chunks_meta:
+
+        if item.get("doc_id") == document_id:
+
+            document_chunks.append(
+                item["text"]
+            )
+
+        if len(document_chunks) >= max_chunks:
+            break
+
+    if not document_chunks:
         return ""
 
-    return "\n\n".join(filtered)
+    context = "\n\n".join(document_chunks)
+
+    return context[:4000]
