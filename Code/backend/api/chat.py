@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+
 from fastapi.responses import StreamingResponse
 
 from pydantic import BaseModel
@@ -20,6 +21,10 @@ from llm.llama_engine import stream_llm
 router = APIRouter()
 
 
+# =====================================================
+# REQUEST MODEL
+# =====================================================
+
 class ChatRequest(BaseModel):
 
     question: str
@@ -29,13 +34,19 @@ class ChatRequest(BaseModel):
     document_id: int | None = None
 
 
+# =====================================================
+# CHAT ROUTE
+# =====================================================
+
 @router.post("/chat")
 def chat(
     request: ChatRequest,
     db: Session = Depends(get_db)
 ):
 
-    # ================= VALIDATE DOCUMENT =================
+    # =================================================
+    # VALIDATE DOCUMENT
+    # =================================================
 
     if request.document_id is None:
 
@@ -61,7 +72,9 @@ def chat(
             media_type="text/plain"
         )
 
-    # ================= CREATE CHAT =================
+    # =================================================
+    # CREATE CHAT
+    # =================================================
 
     if request.chat_id is None:
 
@@ -81,7 +94,9 @@ def chat(
 
         chat_id = request.chat_id
 
-    # ================= SAVE USER MESSAGE =================
+    # =================================================
+    # SAVE USER MESSAGE
+    # =================================================
 
     user_message = Message(
         chat_id=chat_id,
@@ -93,7 +108,22 @@ def chat(
 
     db.commit()
 
-    # ================= RETRIEVE CONTEXT =================
+    # =================================================
+    # RECENT CHAT HISTORY
+    # =================================================
+
+    messages = db.query(Message).filter(
+        Message.chat_id == chat_id
+    ).order_by(
+        Message.created_at.asc()
+    ).all()
+
+    # KEEP ONLY RECENT MEMORY
+    messages = messages[-8:]
+
+    # =================================================
+    # RETRIEVE CONTEXT
+    # =================================================
 
     context = retrieve_context(
         question=request.question,
@@ -101,7 +131,12 @@ def chat(
         k=5
     )
 
-    # ================= NO CONTEXT =================
+    # LIMIT CONTEXT SIZE
+    context = context[:2500]
+
+    # =================================================
+    # NO CONTEXT
+    # =================================================
 
     if not context:
 
@@ -128,27 +163,9 @@ def chat(
             media_type="text/plain"
         )
 
-    # ================= PROMPT =================
-
-    prompt = f"""
-You are an offline AI tutor.
-
-RULES:
-- Use ONLY the provided context
-- Do NOT hallucinate
-- If answer does not exist in context say:
-  "Not found in document"
-
-Context:
-{context}
-
-Question:
-{request.question}
-
-Answer:
-"""
-
-    # ================= STREAMING =================
+    # =================================================
+    # STREAM GENERATION
+    # =================================================
 
     def generate():
 
@@ -156,13 +173,17 @@ Answer:
 
         try:
 
-            for token in stream_llm(request.question,context):
+            for token in stream_llm(
+                question=request.question,
+                context=context,
+                history=messages
+            ):
 
                 full_answer += token
 
                 yield token
 
-            # SAVE AI MESSAGE
+            # SAVE AI RESPONSE
             ai_message = Message(
                 chat_id=chat_id,
                 role="assistant",
@@ -175,9 +196,7 @@ Answer:
 
         except Exception as e:
 
-            error_message = f"\n\nLLM Error: {str(e)}"
-
-            yield error_message
+            yield f"\n\nLLM Error: {str(e)}"
 
     return StreamingResponse(
         generate(),
