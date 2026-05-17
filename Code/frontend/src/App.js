@@ -57,6 +57,9 @@ function App() {
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
 
+    // IMPORTANT FIX
+    e.target.value = null;
+
     if (!file) return;
 
     setLoading(true);
@@ -71,13 +74,13 @@ function App() {
 
         setDocumentId(res.document_id);
 
-        // clear previous chat
         setChat([
           {
             role: "bot",
-            text:
-              `Document "${file.name}" uploaded successfully.\n\n` +
-              `You can now ask questions about this document.`,
+
+            text: res.reused
+              ? `Existing document reused.\n\nYou can now ask questions about "${file.name}".`
+              : `Document "${file.name}" uploaded successfully.\n\nYou can now ask questions about this document.`,
           },
         ]);
       } else {
@@ -101,7 +104,6 @@ function App() {
       setLoading(false);
     }
   };
-
   /* -------------------- STREAMING -------------------- */
 
   const streamAnswer = (fullText) => {
@@ -142,12 +144,13 @@ function App() {
   /* -------------------- SEND MESSAGE -------------------- */
 
   const send = async () => {
-    if (!question.trim() || loading || typing) return;
+    if (!question.trim()) return;
 
-    // MUST upload first
+    if (loading || typing) return;
+
     if (!documentId) {
-      setChat((p) => [
-        ...p,
+      setChat((prev) => [
+        ...prev,
         {
           role: "bot",
           text: "Please upload a document first.",
@@ -159,32 +162,68 @@ function App() {
 
     const userQ = question;
 
-    setChat((p) => [
-      ...p,
-      {
-        role: "user",
-        text: userQ,
-      },
-    ]);
-
     setQuestion("");
 
     setTyping(true);
 
+    // IMPORTANT:
+    // single atomic update
+    setChat((prev) => [
+      ...prev,
+
+      {
+        role: "user",
+        text: userQ,
+      },
+
+      {
+        role: "bot",
+        text: "",
+      },
+    ]);
+
     try {
-      const res = await askQuestion(userQ, chatId, documentId);
+      await askQuestion(
+        userQ,
+        chatId,
+        documentId,
 
-      const answer = res?.answer ?? "No response";
+        // STREAM CALLBACK
+        (chunk) => {
+          setChat((prev) => {
+            const updated = [...prev];
 
-      await streamAnswer(answer);
-    } catch (e) {
-      setChat((p) => [
-        ...p,
-        {
-          role: "bot",
-          text: "Error",
+            // always target LAST BOT MESSAGE
+            const lastIndex = updated.length - 1;
+
+            if (updated[lastIndex] && updated[lastIndex].role === "bot") {
+              updated[lastIndex] = {
+                ...updated[lastIndex],
+                text: updated[lastIndex].text + chunk,
+              };
+            }
+
+            return updated;
+          });
         },
-      ]);
+      );
+    } catch (err) {
+      console.log(err);
+
+      setChat((prev) => {
+        const updated = [...prev];
+
+        const lastIndex = updated.length - 1;
+
+        if (updated[lastIndex] && updated[lastIndex].role === "bot") {
+          updated[lastIndex] = {
+            ...updated[lastIndex],
+            text: "Streaming error",
+          };
+        }
+
+        return updated;
+      });
     } finally {
       setTyping(false);
     }

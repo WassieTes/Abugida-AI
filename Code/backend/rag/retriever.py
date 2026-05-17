@@ -1,36 +1,42 @@
 from rag.embedder import embed_query
 
-from rag.vector_store import search
+from rag.vector_store import (
+    search,
+    chunks_meta
+)
 
 
 def retrieve_context(
     question,
-    k=3,
-    doc_id=None
+    document_id=None,
+    k=3
 ):
 
     query_embedding = embed_query(question)
 
+    # IMPORTANT:
+    # search already supports doc filtering
     results = search(
         query_embedding,
         k=k,
-        doc_id=doc_id
+        doc_id=document_id
     )
+
+    # remove duplicates safely
+    filtered = []
 
     seen = set()
 
-    filtered = []
-
     for r in results:
 
-        if r not in seen:
+        if r in seen:
+            continue
 
-            filtered.append(r)
+        seen.add(r)
 
-            seen.add(r)
+        filtered.append(r)
 
     if not filtered:
-
         return ""
 
     return "\n\n".join(filtered)

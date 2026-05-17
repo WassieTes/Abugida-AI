@@ -1,22 +1,24 @@
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 
 from pydantic import BaseModel
 
 from sqlalchemy.orm import Session
 
-from llm.llama_engine import ask_llm
+from database.db import get_db
+
+from database.models import (
+    Chat,
+    Message,
+    Document
+)
 
 from rag.retriever import retrieve_context
 
-from database.db import get_db
-
-from database.models import Chat, Message
-
+from llm.llama_engine import stream_llm
 
 router = APIRouter()
 
-
-# ---------------- REQUEST MODEL ----------------
 
 class ChatRequest(BaseModel):
 
@@ -24,12 +26,8 @@ class ChatRequest(BaseModel):
 
     chat_id: int | None = None
 
-    # NEW
-    # allows document-specific retrieval
     document_id: int | None = None
 
-
-# ---------------- CHAT ROUTE ----------------
 
 @router.post("/chat")
 def chat(
@@ -37,7 +35,33 @@ def chat(
     db: Session = Depends(get_db)
 ):
 
-    # ---------------- CREATE CHAT ----------------
+    # ================= VALIDATE DOCUMENT =================
+
+    if request.document_id is None:
+
+        def no_doc_stream():
+            yield "Please upload a document first."
+
+        return StreamingResponse(
+            no_doc_stream(),
+            media_type="text/plain"
+        )
+
+    document = db.query(Document).filter(
+        Document.id == request.document_id
+    ).first()
+
+    if not document:
+
+        def invalid_doc_stream():
+            yield "Document not found."
+
+        return StreamingResponse(
+            invalid_doc_stream(),
+            media_type="text/plain"
+        )
+
+    # ================= CREATE CHAT =================
 
     if request.chat_id is None:
 
@@ -57,7 +81,7 @@ def chat(
 
         chat_id = request.chat_id
 
-    # ---------------- SAVE USER MESSAGE ----------------
+    # ================= SAVE USER MESSAGE =================
 
     user_message = Message(
         chat_id=chat_id,
@@ -69,33 +93,50 @@ def chat(
 
     db.commit()
 
-    # ---------------- RETRIEVE CONTEXT ----------------
+    # ================= RETRIEVE CONTEXT =================
 
     context = retrieve_context(
-        request.question,
-        doc_id=request.document_id
+        question=request.question,
+        document_id=request.document_id,
+        k=5
     )
 
-    # ---------------- NO CONTEXT FOUND ----------------
+    # ================= NO CONTEXT =================
 
     if not context:
 
         answer = (
             "I cannot find relevant information "
-            "in the uploaded documents."
+            "in the uploaded document."
         )
 
-    else:
+        ai_message = Message(
+            chat_id=chat_id,
+            role="assistant",
+            content=answer
+        )
 
-        # ---------------- PROMPT ----------------
+        db.add(ai_message)
 
-        prompt = f"""
+        db.commit()
+
+        def empty_stream():
+            yield answer
+
+        return StreamingResponse(
+            empty_stream(),
+            media_type="text/plain"
+        )
+
+    # ================= PROMPT =================
+
+    prompt = f"""
 You are an offline AI tutor.
 
 RULES:
 - Use ONLY the provided context
 - Do NOT hallucinate
-- If answer is missing, say:
+- If answer does not exist in context say:
   "Not found in document"
 
 Context:
@@ -107,38 +148,38 @@ Question:
 Answer:
 """
 
-        # ---------------- LLM ----------------
+    # ================= STREAMING =================
+
+    def generate():
+
+        full_answer = ""
 
         try:
 
-            answer = ask_llm(prompt)
+            for token in stream_llm(request.question,context):
+
+                full_answer += token
+
+                yield token
+
+            # SAVE AI MESSAGE
+            ai_message = Message(
+                chat_id=chat_id,
+                role="assistant",
+                content=full_answer
+            )
+
+            db.add(ai_message)
+
+            db.commit()
 
         except Exception as e:
 
-            return {
-                "success": False,
-                "answer": "LLM error",
-                "error": str(e)
-            }
+            error_message = f"\n\nLLM Error: {str(e)}"
 
-    # ---------------- SAVE AI MESSAGE ----------------
+            yield error_message
 
-    ai_message = Message(
-        chat_id=chat_id,
-        role="assistant",
-        content=answer
+    return StreamingResponse(
+        generate(),
+        media_type="text/plain"
     )
-
-    db.add(ai_message)
-
-    db.commit()
-
-    # ---------------- RESPONSE ----------------
-
-    return {
-        "success": True,
-        "chat_id": chat_id,
-        "document_id": request.document_id,
-        "answer": answer,
-        "context_used": context
-    }

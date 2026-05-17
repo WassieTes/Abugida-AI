@@ -3,19 +3,25 @@ import numpy as np
 import os
 import pickle
 
+# ---------------- CONFIG ----------------
+
 DIMENSION = 384
 
 INDEX_PATH = "storage/faiss.index"
-
 META_PATH = "storage/chunks.pkl"
 
+# ---------------- CORE STORAGE ----------------
 
 index = faiss.IndexFlatIP(DIMENSION)
 
+# IMPORTANT:
+# each entry index MUST match FAISS vector index
 chunks_meta = []
 
 
-# ---------------- ADD EMBEDDINGS ----------------
+# =========================================================
+# ADD EMBEDDINGS
+# =========================================================
 
 def add_embeddings(
     embeddings,
@@ -26,10 +32,9 @@ def add_embeddings(
 
     global chunks_meta
 
-    embeddings = np.array(
-        embeddings
-    ).astype("float32")
+    embeddings = np.array(embeddings).astype("float32")
 
+    # normalize for cosine similarity
     faiss.normalize_L2(embeddings)
 
     index.add(embeddings)
@@ -38,12 +43,14 @@ def add_embeddings(
 
         chunks_meta.append({
             "text": chunk,
-            "doc": doc_name,
+            "doc_name": doc_name,
             "doc_id": doc_id
         })
 
 
-# ---------------- SEARCH ----------------
+# =========================================================
+# SEARCH
+# =========================================================
 
 def search(
     query_embedding,
@@ -74,10 +81,10 @@ def search(
 
         meta = chunks_meta[idx]
 
-        # document filtering
+        # document filter (IMPORTANT FOR ISOLATION)
         if doc_id is not None:
 
-            if meta["doc_id"] != doc_id:
+            if meta.get("doc_id") != doc_id:
                 continue
 
         results.append(meta["text"])
@@ -88,83 +95,88 @@ def search(
     return results
 
 
-# ---------------- REMOVE DOCUMENT ----------------
+# =========================================================
+# DELETE DOCUMENT (SAFE REBUILD VERSION)
+# =========================================================
 
 def remove_document_embeddings(doc_id):
 
     global index
     global chunks_meta
 
-    remaining_meta = []
+    new_vectors = []
+    new_meta = []
 
-    remaining_vectors = []
+    # rebuild everything safely
+    for i in range(len(chunks_meta)):
 
-    for i, meta in enumerate(chunks_meta):
+        meta = chunks_meta[i]
 
-        if meta["doc_id"] != doc_id:
+        if meta.get("doc_id") == doc_id:
+            continue
 
-            remaining_meta.append(meta)
+        # reconstruct vector safely
+        vec = index.reconstruct(i)
 
-            vec = index.reconstruct(i)
+        new_vectors.append(vec)
+        new_meta.append(meta)
 
-            remaining_vectors.append(vec)
-
-    # rebuild fresh index
+    # rebuild index
     new_index = faiss.IndexFlatIP(DIMENSION)
 
-    if remaining_vectors:
+    if new_vectors:
 
         vectors_np = np.array(
-            remaining_vectors
+            new_vectors
         ).astype("float32")
+
+        faiss.normalize_L2(vectors_np)
 
         new_index.add(vectors_np)
 
     index = new_index
-
-    chunks_meta = remaining_meta
+    chunks_meta = new_meta
 
     save_store()
 
 
-# ---------------- GET DOCUMENT CHUNKS ----------------
+# =========================================================
+# GET DOCUMENT CHUNKS
+# =========================================================
 
 def get_document_chunks(doc_id):
 
     return [
         c for c in chunks_meta
-        if c["doc_id"] == doc_id
+        if c.get("doc_id") == doc_id
     ]
 
 
-# ---------------- SAVE ----------------
+# =========================================================
+# SAVE STORE
+# =========================================================
 
 def save_store():
 
     os.makedirs("storage", exist_ok=True)
 
-    faiss.write_index(
-        index,
-        INDEX_PATH
-    )
+    faiss.write_index(index, INDEX_PATH)
 
     with open(META_PATH, "wb") as f:
-
         pickle.dump(chunks_meta, f)
 
 
-# ---------------- LOAD ----------------
+# =========================================================
+# LOAD STORE
+# =========================================================
 
 def load_store():
 
-    global index
-    global chunks_meta
+    global index, chunks_meta
 
     if os.path.exists(INDEX_PATH):
 
-        index = faiss.read_index(
-            INDEX_PATH
-        )
+        index = faiss.read_index(INDEX_PATH)
 
     if os.path.exists(META_PATH):
 

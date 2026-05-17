@@ -5,7 +5,7 @@ const API = axios.create({
   timeout: 60000,
 });
 
-// ---------------- UPLOAD PDF ----------------
+// ================= UPLOAD =================
 
 export const uploadPDF = async (file) => {
   try {
@@ -30,24 +30,55 @@ export const uploadPDF = async (file) => {
   }
 };
 
-// ---------------- CHAT ----------------
+// ================= STREAM CHAT =================
 
-export const askQuestion = async (question, chatId, documentId) => {
-  try {
-    const res = await API.post("/chat", {
+export const askQuestion = async (
+  question,
+  chatId = null,
+  documentId = null,
+  onChunk,
+) => {
+  const response = await fetch("http://127.0.0.1:8000/chat", {
+    method: "POST",
+
+    headers: {
+      "Content-Type": "application/json",
+    },
+
+    body: JSON.stringify({
       question,
       chat_id: chatId,
       document_id: documentId,
-    });
+    }),
+  });
 
-    return res.data;
-  } catch (err) {
-    console.log("CHAT ERROR:", err.response?.data || err.message);
-
-    return {
-      success: false,
-      answer: "Network error",
-      error: err.response?.data || err.message,
-    };
+  if (!response.ok) {
+    throw new Error("Chat request failed");
   }
+
+  if (!response.body) {
+    throw new Error("No response stream");
+  }
+
+  const reader = response.body.getReader();
+
+  const decoder = new TextDecoder("utf-8");
+
+  let fullText = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) break;
+
+    const chunk = decoder.decode(value);
+
+    fullText += chunk;
+
+    if (onChunk) {
+      onChunk(chunk);
+    }
+  }
+
+  return fullText;
 };
