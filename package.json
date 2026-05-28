@@ -1,0 +1,12 @@
+{
+  "name": "abugida-ai",
+  "version": "1.0.0",
+  "description": "Abugida AI is offline Desktop AI app, which is made for Ethiopian Students have not access to internet.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
